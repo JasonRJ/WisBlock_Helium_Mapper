@@ -5,10 +5,10 @@
 #define SCHED_MAX_EVENT_DATA_SIZE APP_TIMER_SCHED_EVENT_DATA_SIZE /**< Maximum size of scheduler events. */
 #define SCHED_QUEUE_SIZE 60                                       /**< Maximum number of events in the scheduler queue. */
 
-#define LORAWAN_APP_DATA_BUFF_SIZE 64  /**< Size of the data to be transmitted. */
+#define LORAWAN_APP_DATA_BUFF_SIZE 51   /**< Size of the data to be transmitted. */
 #define LORAWAN_APP_TX_DUTYCYCLE 12000  /**< Defines the application data transmission duty cycle (value in ms). */
-#define APP_TX_DUTYCYCLE_RND 1000      /**< Defines a random delay for application data transmission duty cycle (value in ms). */
-#define JOINREQ_NBTRIALS 3             /**< Number of trials for the join request. */
+#define APP_TX_DUTYCYCLE_RND 1000       /**< Defines a random delay for application data transmission duty cycle (value in ms). */
+#define JOINREQ_NBTRIALS 30             /**< Number of trials for the join request. */
 
 static void lorawan_has_joined_handler(void);
 
@@ -24,11 +24,9 @@ TimerEvent_t appTimer;                                                        //
 static uint8_t m_lora_app_data_buffer[LORAWAN_APP_DATA_BUFF_SIZE];            ///< Lora user application data buffer.
 static lmh_app_data_t m_lora_app_data = {m_lora_app_data_buffer, 0, 0, 0, 0}; ///< Lora user application data structure.
 static lmh_param_t lora_param_init = {LORAWAN_ADR_OFF, LORAWAN_DEFAULT_DATARATE, LORAWAN_PUBLIC_NETWORK,
-                                      JOINREQ_NBTRIALS, LORAWAN_DEFAULT_TX_POWER, LORAWAN_DUTYCYCLE_OFF
-};
+                                      JOINREQ_NBTRIALS, LORAWAN_DEFAULT_TX_POWER, LORAWAN_DUTYCYCLE_OFF};
 static lmh_callback_t lora_callbacks = {BoardGetBatteryLevel, BoardGetUniqueId, BoardGetRandomSeed,
-                                        lorawan_rx_handler, lorawan_has_joined_handler, lorawan_confirm_class_handler
-};
+                                        lorawan_rx_handler, lorawan_has_joined_handler, lorawan_confirm_class_handler};
 
 #include <bluefruit.h>
 
@@ -37,11 +35,12 @@ void initBLE();
 extern bool bleUARTisConnected;
 extern BLEUart bleuart;
 
-// If you configure the three OTAA keys below comment out the include below the keys.
+// Configure the three OTAA keys here or in an external file and #include that file
 //uint8_t nodeDeviceEUI[8] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
 //uint8_t nodeAppEUI[8] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
 //uint8_t nodeAppKey[16] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
-// Set OTAA keys outside of the project in my case in the directory where the Arduino sketchbooks are stored.
+// Set OTAA keys outside of the project in my case in the directory called OTAA_Keys where the Arduino sketchbooks are stored
+//#include "../../../OTAA_Keys/myMapperOTAAkeys"
 #include "../../../OTAA_Keys/WisBlock-B997"
 //#include "../../../OTAA_Keys/WisBlock-B99E"
 
@@ -57,6 +56,7 @@ static uint32_t send_total = 0;
 static uint32_t send_success = 0;
 static uint32_t send_failure = 0;
 SFE_UBLOX_GPS GNSS;
+
 
 void blink() {
     blueLEDstate = !blueLEDstate;
@@ -110,7 +110,10 @@ void setup() {
     GNSS.begin(Serial1);
     Serial.println("GNSS UART Initalized");
 
+    //GNSS.factoryDefault();
+    //GNSS.saveConfiguration();
     //GNSS.factoryReset();
+    //GNSS.saveConfiguration();
     //GNSS.hardReset();
     //GNSS.setSerialRate(38400);
 
@@ -177,33 +180,40 @@ static void lorawan_rx_handler(lmh_app_data_t *app_data) {
                   app_data->port, app_data->buffsize, app_data->rssi, app_data->snr, app_data->buffer);
 
     switch (app_data->port) {
-        case 3:
-            // Port 3 switches the class
+        case 11:
+            // Send a packet to port 11 to toggle the green LED
+            Serial.println("Data received on port 11");
+            if (app_data->buffsize > 0) {
+                Serial.println("Toggle Green LED State");
+                greenLEDstate = !greenLEDstate;
+                digitalWrite(greenLEDGPIO, greenLEDstate);
+            }
+            break;
+
+        case 111:
+            // Send a 1 character message on port 111 to reset u-blox GNSS
+            Serial.println("Data received on port 111");
             if (app_data->buffsize == 1) {
+                Serial.printf("Single character received '%s', %x", app_data->buffer[0], app_data->buffer[0]);
+                Serial.println();
                 switch (app_data->buffer[0]) {
-                    case 0:
-                        lmh_class_request(CLASS_A);
-                        lorawan_confirm_class_handler(CLASS_A);
+                    case 0x30: // character 0
+                        Serial.println("hardReset");
+                        GNSS.hardReset();
                         break;
 
-                    case 1:
-                        lmh_class_request(CLASS_B);
-                        lorawan_confirm_class_handler(CLASS_B);
-                        break;
-
-                    case 2:
-                        lmh_class_request(CLASS_C);
-                        lorawan_confirm_class_handler(CLASS_C);
+                    case 0x31: // character 1
+                        Serial.println("factoryReset");
+                        GNSS.factoryDefault();
+                        GNSS.saveConfiguration();
+                        GNSS.factoryReset();
+                        GNSS.saveConfiguration();
                         break;
 
                     default:
                         break;
                 }
             }
-            break;
-
-        case LORAWAN_APP_PORT:
-            // YOUR_JOB: Take action on received data
             break;
 
         default:
@@ -223,12 +233,11 @@ static void send_lora_frame(void) {
         Serial.println("Not joined to a network, skip sending frame");
         return;
     }
-    GNSS.getPVT();
     digitalWrite(greenLEDGPIO, HIGH);
+    uint32_t i = 0;
+    int32_t data = 0;
+    m_lora_app_data.port = 1;
     if (GNSS.getTimeValid()) {
-        uint32_t i = 0;
-        int32_t data = 0;
-        m_lora_app_data.port = 1;
         data = (int32_t)(GNSS.latitude);
         Serial.print("Location: ");
         Serial.print(data);
@@ -237,33 +246,45 @@ static void send_lora_frame(void) {
         m_lora_app_data.buffer[i++] = data >> 8;
         m_lora_app_data.buffer[i++] = data;
         data = (int32_t)(GNSS.longitude);
-        Serial.print(',');
+        Serial.print(", ");
         Serial.print(data);
         m_lora_app_data.buffer[i++] = data >> 24;
         m_lora_app_data.buffer[i++] = data >> 16;
         m_lora_app_data.buffer[i++] = data >> 8;
         m_lora_app_data.buffer[i++] = data;
-        data = (int16_t)(GNSS.altitudeMSL * 1e-3);
+        data = (int32_t)(GNSS.altitudeMSL);
         Serial.print(", Altitude: ");
         Serial.print(data);
+        m_lora_app_data.buffer[i++] = data >> 24;
+        m_lora_app_data.buffer[i++] = data >> 16;
         m_lora_app_data.buffer[i++] = data >> 8;
         m_lora_app_data.buffer[i++] = data;
-        data = (int8_t)(GNSS.horizontalAccuracy * 1e-3);
+        data = (uint32_t)(GNSS.horizontalAccuracy);
         Serial.print(", Accuracy: ");
         Serial.print(data);
+        m_lora_app_data.buffer[i++] = data >> 24;
+        m_lora_app_data.buffer[i++] = data >> 16;
+        m_lora_app_data.buffer[i++] = data >> 8;
         m_lora_app_data.buffer[i++] = data;
-        data = (int8_t)(GNSS.SIV);
+        data = (uint8_t)(GNSS.SIV);
         Serial.print(", Satellites: ");
         Serial.print(data);
         m_lora_app_data.buffer[i++] = data;
-        data = (int8_t)(GNSS.pDOP * 1e-2);
+        data = (uint16_t)(GNSS.pDOP);
         Serial.print(", HDOP: ");
         Serial.print(data);
+        m_lora_app_data.buffer[i++] = data >> 8;
         m_lora_app_data.buffer[i++] = data;
-        m_lora_app_data.buffer[i++] = 0; // padding so cargo accepts then data
-        m_lora_app_data.buffsize = i;
+        data = (int32_t)(GNSS.groundSpeed);
+        Serial.print(", Speed: ");
+        Serial.print(data);
+        m_lora_app_data.buffer[i++] = data >> 24;
+        m_lora_app_data.buffer[i++] = data >> 16;
+        m_lora_app_data.buffer[i++] = data >> 8;
+        m_lora_app_data.buffer[i++] = data;
         Serial.println();
     }
+    m_lora_app_data.buffsize = i;
 
     lmh_error_status error = lmh_send(&m_lora_app_data, LMH_UNCONFIRMED_MSG);
     if (error == LMH_SUCCESS) {
