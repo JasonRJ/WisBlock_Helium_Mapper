@@ -2,13 +2,13 @@
 #include "LoRaWan-RAK4630.h"
 #include "SparkFun_Ublox_Arduino_Library.h" //http://librarymanager/All#SparkFun_Ublox_GPS
 
-#define SCHED_MAX_EVENT_DATA_SIZE APP_TIMER_SCHED_EVENT_DATA_SIZE /**< Maximum size of scheduler events. */
-#define SCHED_QUEUE_SIZE 60                                       /**< Maximum number of events in the scheduler queue. */
+#define SCHED_MAX_EVENT_DATA_SIZE APP_TIMER_SCHED_EVENT_DATA_SIZE // Maximum size of scheduler events
+#define SCHED_QUEUE_SIZE 60                                       // Maximum number of events in the scheduler queue
 
-#define LORAWAN_APP_DATA_BUFF_SIZE 51   /**< Size of the data to be transmitted. */
-#define LORAWAN_APP_TX_DUTYCYCLE 12000  /**< Defines the application data transmission duty cycle (value in ms). */
-#define APP_TX_DUTYCYCLE_RND 1000       /**< Defines a random delay for application data transmission duty cycle (value in ms). */
-#define JOINREQ_NBTRIALS 30             /**< Number of trials for the join request. */
+#define LORAWAN_APP_DATA_BUFF_SIZE 128  // Size of the data to be transmitted
+#define LORAWAN_APP_TX_DUTYCYCLE 7500   // Data transmission cycle (value in ms)
+#define APP_TX_DUTYCYCLE_RND 500        // Random delay for application data transmission cycle (value in ms)
+#define JOINREQ_NBTRIALS 20             // Number of trys to join LoRa network
 
 static void lorawan_has_joined_handler(void);
 
@@ -20,9 +20,9 @@ static void send_lora_frame(void);
 
 static uint32_t timers_init(void);
 
-TimerEvent_t appTimer;                                                        ///< LoRa tranfer timer instance.
-static uint8_t m_lora_app_data_buffer[LORAWAN_APP_DATA_BUFF_SIZE];            ///< Lora user application data buffer.
-static lmh_app_data_t m_lora_app_data = {m_lora_app_data_buffer, 0, 0, 0, 0}; ///< Lora user application data structure.
+TimerEvent_t appTimer;                                                        // tranfer timer instance
+static uint8_t m_lora_app_data_buffer[LORAWAN_APP_DATA_BUFF_SIZE];            // application data buffer
+static lmh_app_data_t m_lora_app_data = {m_lora_app_data_buffer, 0, 0, 0, 0}; // application data structure
 static lmh_param_t lora_param_init = {LORAWAN_ADR_OFF, LORAWAN_DEFAULT_DATARATE, LORAWAN_PUBLIC_NETWORK,
                                       JOINREQ_NBTRIALS, LORAWAN_DEFAULT_TX_POWER, LORAWAN_DUTYCYCLE_OFF};
 static lmh_callback_t lora_callbacks = {BoardGetBatteryLevel, BoardGetUniqueId, BoardGetRandomSeed,
@@ -36,6 +36,9 @@ extern bool bleUARTisConnected;
 extern BLEUart bleuart;
 
 // Configure the three OTAA keys here or in an external file and #include that file
+//uint8_t nodeDeviceEUI[8] = SECRET_NODEDEVICEEUI;
+//uint8_t nodeAppEUI[8] = SECRET_NODEAPPEUI;
+//uint8_t nodeAppKey[16] = SECRET_NODEAPPKEY;
 //uint8_t nodeDeviceEUI[8] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
 //uint8_t nodeAppEUI[8] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
 //uint8_t nodeAppKey[16] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
@@ -52,6 +55,7 @@ const byte PPSinterruptGPIO = 17; // RAK1910 GNSS Module (u-blox MAX-7Q) 1PPS on
 const byte GNSSpowerGPIO = 34; // RAK1910 GNSS Module (u-blox MAX-7Q) VCC 3.3V via 3V3_S Powered by GPIO 34
 
 const bool OTAA = true;
+static uint32_t err_code = 0;
 static uint32_t send_total = 0;
 static uint32_t send_success = 0;
 static uint32_t send_failure = 0;
@@ -132,7 +136,7 @@ void setup() {
     initBLE();
 
     // Initialize Scheduler and timer
-    uint32_t err_code = timers_init();
+    err_code = timers_init();
     if (err_code != 0) {
         Serial.printf("timers_init failed - % d\n", err_code);
     }
@@ -231,6 +235,8 @@ static void lorawan_confirm_class_handler(DeviceClass_t Class) {
 static void send_lora_frame(void) {
     if (lmh_join_status_get() != LMH_SET) {
         Serial.println("Not joined to a network, skip sending frame");
+        digitalWrite(greenLEDGPIO, HIGH);
+        lmh_join(); // try to join network
         return;
     }
     digitalWrite(greenLEDGPIO, HIGH);
