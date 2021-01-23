@@ -1,6 +1,6 @@
 #include "SX126x-RAK4630.h"
 #include "LoRaWan-RAK4630.h"
-#include "SparkFun_Ublox_Arduino_Library.h" //http://librarymanager/All#SparkFun_Ublox_GPS
+#include "SparkFun_Ublox_Arduino_Library.h"
 
 #define SCHED_MAX_EVENT_DATA_SIZE APP_TIMER_SCHED_EVENT_DATA_SIZE // Maximum size of scheduler events
 #define SCHED_QUEUE_SIZE 60                                       // Maximum number of events in the scheduler queue
@@ -292,6 +292,8 @@ static void send_lora_frame(void) {
     }
     m_lora_app_data.buffsize = i;
 
+    lmh_datarate_set(DR_1, LORAWAN_ADR_OFF);
+    lmh_tx_power_set(TX_POWER_0);
     lmh_error_status error = lmh_send(&m_lora_app_data, LMH_UNCONFIRMED_MSG);
     if (error == LMH_SUCCESS) {
         send_success++;
